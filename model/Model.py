@@ -405,6 +405,17 @@ class MemoryInducedTransformer(nn.Module):
         self.center_pose = nn.Parameter(torch.randn(int(n_frames/3),num_joints,dim_feat))
         self.center_pos_embed = nn.Parameter(torch.zeros(1, num_joints, dim_feat))
 
+        # 添加全局局部通信模块
+        self.global_local_comm = nn.ModuleList([
+            GlobalLocalCommunicationModule(
+                dim=dim_feat,
+                num_heads=num_heads,
+                qkv_bias=qkv_bias,
+                attn_drop=attn_drop,
+                proj_drop=drop
+            ) for _ in range(n_layers)
+        ])
+
     def forward(self, x, return_rep=False):
         """
         :param x: tensor with shape [B, T, J, C] (T=243, J=17, C=3)
@@ -415,10 +426,16 @@ class MemoryInducedTransformer(nn.Module):
         x = self.joints_embed(x)  #
         x = x + self.pos_embed
 
-        for layer,temporal_layer in zip(self.layers,self.temporal_layers):
-            x = layer(x)
-            x,pose_query = temporal_layer(x,pose_query)
+        # 保存初始特征用于级联
+        initial_features = x
 
+        for i, (layer, temporal_layer, gl_comm) in enumerate(zip(self.layers, self.temporal_layers, self.global_local_comm)):
+            # 常规处理
+            x = layer(x)
+            x, pose_query = temporal_layer(x, pose_query)
+            
+            # 全局局部通信
+            x = gl_comm(x, initial_features if i % 3 == 0 else None)
 
         x = self.norm(x)
         x = self.rep_logit(x)

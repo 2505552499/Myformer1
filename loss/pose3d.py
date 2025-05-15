@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
+from model.improved_model import biomechanical_loss
 
 
 def mpjpe(predicted, target):
