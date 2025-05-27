@@ -1,3 +1,4 @@
+
 from model.Model import MemoryInducedTransformer
 from utils.activation import SymSum
 from torch import nn
@@ -111,46 +112,9 @@ def load_model_TCPFormer(args):
                                graph_only=args.graph_only,
                                neighbour_num=args.neighbour_num,
                                n_frames=args.n_frames)
-    elif args.model_name == "ImprovedMemoryInducedTransformer":
-        from model.improved_model import ImprovedMemoryInducedTransformer
-        model = ImprovedMemoryInducedTransformer(n_layers=args.n_layers,
-                               dim_in=args.dim_in,
-                               dim_feat=args.dim_feat,
-                               dim_rep=args.dim_rep,
-                               dim_out=args.dim_out,
-                               mlp_ratio=args.mlp_ratio,
-                               act_layer=act_mapper[args.act_layer],
-                               attn_drop=args.attn_drop,
-                               drop=args.drop,
-                               drop_path=args.drop_path,
-                               use_layer_scale=args.use_layer_scale,
-                               layer_scale_init_value=args.layer_scale_init_value,
-                               use_adaptive_fusion=args.use_adaptive_fusion,
-                               num_heads=args.num_heads,
-                               qkv_bias=args.qkv_bias,
-                               qkv_scale=args.qkv_scale,
-                               hierarchical=args.hierarchical,
-                               num_joints=args.num_joints,
-                               use_temporal_similarity=args.use_temporal_similarity,
-                               temporal_connection_len=args.temporal_connection_len,
-                               use_tcn=args.use_tcn,
-                               graph_only=args.graph_only,
-                               neighbour_num=args.neighbour_num,
-                               n_frames=args.n_frames,
-                               use_hourglass_tokenizer=args.use_hourglass_tokenizer,
-                               tokenizer_reduction_ratio=args.tokenizer_reduction_ratio,
-                               min_tokens=args.min_tokens,
-                               use_global_local_comm=args.use_global_local_comm)
     else:
         raise Exception("Undefined model name")
 
     return model
-
-
-def load_model(args):
-    """
-    load_model_TCPFormer的别名
-    """
-    return load_model_TCPFormer(args)
 
 

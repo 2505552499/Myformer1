@@ -53,15 +53,15 @@ def construct_include(loader: Loader, node: yaml.Node) -> Any:
             return ''.join(f.readlines())
 
 
-    def get_config(config_path):
-        yaml.add_constructor('!include', construct_include, Loader)
-        with open(config_path, 'r') as stream:
-            config = yaml.load(stream, Loader=Loader)
-        config = edict(config)
-        _, config_filename = os.path.split(config_path)
-        config_name, _ = os.path.splitext(config_filename)
-        config.name = config_name
-        return config
+def get_config(config_path):
+    yaml.add_constructor('!include', construct_include, Loader)
+    with open(config_path, 'r') as stream:
+        config = yaml.load(stream, Loader=Loader)
+    config = edict(config)
+    _, config_filename = os.path.split(config_path)
+    config_name, _ = os.path.splitext(config_filename)
+    config.name = config_name
+    return config
 
 
 def count_param_numbers(model):

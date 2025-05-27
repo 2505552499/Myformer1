@@ -228,7 +228,7 @@ def train(args, opts):
             if opts.use_wandb:
                 wandb.init(id=wandb_id,
                         project='MemoryInducedTransformer',
-                        resume="allow",
+                        resume="must",
                         settings=wandb.Settings(start_method='fork'))
         else:
             if opts.use_wandb:
@@ -252,7 +252,7 @@ def train(args, opts):
                 exit()
             
         print(f"[INFO] epoch {epoch}")
-        loss_names = ['3d_pose', '3d_scale', 'lg', 'lv', '3d_velocity', 'angle', 'angle_velocity', 'total']
+        loss_names = ['3d_pose', '3d_scale', '2d_proj', 'lg', 'lv', '3d_velocity', 'angle', 'angle_velocity', 'total']
         losses = {name: AverageMeter() for name in loss_names}
     
         train_one_epoch(args, model, train_loader, optimizer, losses)
@@ -267,11 +267,12 @@ def train(args, opts):
         save_data_inference(opts.new_checkpoint, data_inference, latest=True)
 
         if opts.use_wandb:
-            log_data = {
+            wandb.log({
                 'lr': lr,
                 'train/loss_3d_pose': losses['3d_pose'].avg,
                 'train/loss_3d_scale': losses['3d_scale'].avg,
                 'train/loss_3d_velocity': losses['3d_velocity'].avg,
+                'train/loss_2d_proj': losses['2d_proj'].avg,
                 'train/loss_lg': losses['lg'].avg,
                 'train/loss_lv': losses['lv'].avg,
                 'train/loss_angle': losses['angle'].avg,
@@ -279,11 +280,7 @@ def train(args, opts):
                 'train/total': losses['total'].avg,
                 'eval/mpjpe': mpjpe,
                 'eval/min_mpjpe': min_mpjpe,
-            }
-            if '2d_proj' in log_data:
-                del log_data['train/loss_2d_proj']
-            
-            wandb.log(log_data, step=epoch + 1)
+            }, step=epoch + 1)
 
         lr = decay_lr_exponentially(lr, lr_decay, optimizer)
 

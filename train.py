@@ -22,11 +22,9 @@ from utils.data import flip_data
 from utils.tools import set_random_seed, get_config, print_args, create_directory_if_not_exists
 from torch.utils.data import DataLoader
 
-from utils.learning import AverageMeter, decay_lr_exponentially,load_model
+from utils.learning import AverageMeter, decay_lr_exponentially,load_model_TCPFormer
 from utils.tools import count_param_numbers
 from utils.data import Augmenter2D
-from model.improved_model import biomechanical_loss
-from model.improved_model import BiomechanicalConstraintModule, ImprovedMemoryInducedTransformer
 os.environ['CUDA_VISIBLE_DEVICES'] = '0' 
 
 def parse_args():
@@ -49,23 +47,10 @@ def parse_args():
 
 
 def train_one_epoch(args, model, train_loader, optimizer, device, losses):
-    model_parts = model if isinstance(model, tuple) else (model, None)
-    main_model = model_parts[0]
-    biomech_module = model_parts[1]
-    
-    main_model.train()
-    if biomech_module is not None:
-        biomech_module.train()
-        
+    model.train()        
     optimizer.zero_grad()
-    accumulation_steps = args.accumulation_steps if hasattr(args, 'accumulation_steps') else 1
+    accumulation_steps = 1
     i = 0
-    
-    # 确保losses字典包含所有需要的键
-    for loss_key in ['3d_pose', '3d_scale', '2d_proj', 'bio', '3d_velocity', 'lv', 'lg', 'angle', 'angle_velocity', 'total']:
-        if loss_key not in losses:
-            losses[loss_key] = AverageMeter()  #每个batch的损失
-    
     for x, y in tqdm(train_loader):
         batch_size = x.shape[0]
         x, y = x.to(device), y.to(device)
@@ -74,11 +59,12 @@ def train_one_epoch(args, model, train_loader, optimizer, device, losses):
             if args.root_rel:
                 y = y - y[..., 0:1, :]
             else:
-                y[..., 2] = y[..., 2] - y[:, 0:1, 0:1, 2]
+                y[..., 2] = y[..., 2] - y[:, 0:1, 0:1, 2]  # Place the depth of first frame root to be 0
 
-        pred = main_model(x)
+        pred = model(x)
 
-        # 基本损失计算
+
+
         loss_3d_pos = loss_mpjpe(pred, y)
         loss_3d_scale = n_mpjpe(pred, y)
         loss_3d_velocity = loss_velocity(pred, y)
@@ -87,51 +73,16 @@ def train_one_epoch(args, model, train_loader, optimizer, device, losses):
         loss_a = loss_angle(pred, y)
         loss_av = loss_angle_velocity(pred, y)
 
-        # 如果启用生物力学约束，计算额外损失
-        bio_loss = 0
-        if biomech_module is not None and args.use_biomech_constraints:
-            # 提取特征用于生物力学分析
-            with torch.no_grad():
-                # 处理DataParallel模型
-                if isinstance(main_model, torch.nn.DataParallel):
-                    # 获取基础模型
-                    base_model = main_model.module
-                    features = base_model.get_features(x)
-                else:
-                    features = main_model.get_features(x)
-                motion_complexity = torch.std(y, dim=(1,2)).mean()
-            
-            # 应用生物力学模块
-            predicted_angles, actual_angles, predicted_bone_lengths, actual_bone_lengths, action_logits = (
-                biomech_module(features, y)
-            )
-            
-            # 计算生物力学损失
-            bio_loss, bio_metrics = biomechanical_loss(
-                predicted_angles, actual_angles, 
-                predicted_bone_lengths, actual_bone_lengths,
-                action_logits, None, biomech_module.joint_angle_limits,
-                motion_complexity
-            )
-            
-            losses['bio'].update(bio_loss.item(), batch_size)
 
-        # 总损失计算
-        loss_total = (
-            loss_3d_pos + 
-            args.lambda_scale * loss_3d_scale + 
-            args.lambda_3d_velocity * loss_3d_velocity + 
-            args.lambda_lv * loss_lv + 
-            args.lambda_lg * loss_lg + 
-            args.lambda_a * loss_a + 
-            args.lambda_av * loss_av
-        )
-        
-        # 添加生物力学损失（如果启用）
-        if args.use_biomech_constraints:
-            loss_total = loss_total + args.lambda_bio * bio_loss
+        loss_total = loss_3d_pos + \
+                    args.lambda_scale * loss_3d_scale + \
+                    args.lambda_3d_velocity * loss_3d_velocity + \
+                    args.lambda_lv * loss_lv + \
+                    args.lambda_lg * loss_lg + \
+                    args.lambda_a * loss_a + \
+                    args.lambda_av * loss_av 
+                    # args.lambda_mi * loss_mi
 
-        # 更新损失记录
         losses['3d_pose'].update(loss_3d_pos.item(), batch_size)
         losses['3d_scale'].update(loss_3d_scale.item(), batch_size)
         losses['3d_velocity'].update(loss_3d_velocity.item(), batch_size)
@@ -141,10 +92,9 @@ def train_one_epoch(args, model, train_loader, optimizer, device, losses):
         losses['angle_velocity'].update(loss_av.item(), batch_size)
         losses['total'].update(loss_total.item(), batch_size)
 
-        # 梯度累积
         loss_total = loss_total / accumulation_steps
         loss_total.backward()
-        if (i+1) % accumulation_steps == 0:
+        if(i+1)%accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
         i += 1
@@ -152,11 +102,6 @@ def train_one_epoch(args, model, train_loader, optimizer, device, losses):
 def evaluate(args, model, test_loader, datareader, device):
     print("[INFO] Evaluation")
     results_all = []
-    
-    # 如果model是元组，提取主模型
-    if isinstance(model, tuple):
-        model = model[0]
-        
     model.eval()
     with torch.no_grad():
         for x, y in tqdm(test_loader):
@@ -286,13 +231,12 @@ def evaluate(args, model, test_loader, datareader, device):
     return e1, e2, joint_errors, acceleration_error
 
 
-def save_checkpoint(checkpoint_path, epoch, lr, optimizer, model, biomech_module, min_mpjpe, wandb_id):
+def save_checkpoint(checkpoint_path, epoch, lr, optimizer, model, min_mpjpe, wandb_id):
     torch.save({
         'epoch': epoch + 1,
         'lr': lr,
         'optimizer': optimizer.state_dict(),
         'model': model.state_dict(),
-        'biomech_module': biomech_module.state_dict() if biomech_module is not None else None,
         'min_mpjpe': min_mpjpe,
         'wandb_id': wandb_id,
     }, checkpoint_path)
@@ -321,20 +265,17 @@ def train(args, opts):
                                 dt_root='data/motion3d', dt_file=args.dt_file)  # Used for H36m evaluation
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = load_model(args)
+    model = load_model_TCPFormer(args)
     if torch.cuda.is_available():
         model = torch.nn.DataParallel(model)
     model.to(device)
 
-    biomech_module = BiomechanicalConstraintModule(num_joints=args.num_joints, dim_feat=args.dim_feat)
-    biomech_module.to(device)
 
     n_params = count_param_numbers(model)
     print(f"[INFO] Number of parameters: {n_params:,}")
 
     lr = args.learning_rate
-    optimizer = optim.AdamW(list(filter(lambda p: p.requires_grad, model.parameters())) + 
-                          list(filter(lambda p: p.requires_grad, biomech_module.parameters())),
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()),
                             lr=lr,
                             weight_decay=args.weight_decay)
     lr_decay = args.lr_decay
@@ -347,9 +288,6 @@ def train(args, opts):
         if os.path.exists(checkpoint_path):
             checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage, weights_only=False)
             model.load_state_dict(checkpoint['model'], strict=True)
-            
-            if 'biomech_module' in checkpoint and checkpoint['biomech_module'] is not None:
-                biomech_module.load_state_dict(checkpoint['biomech_module'], strict=True)
 
             if opts.resume:
                 lr = checkpoint['lr']
@@ -367,14 +305,14 @@ def train(args, opts):
             if opts.use_wandb:
                 wandb.init(id=wandb_id,
                         project='MemoryInducedTransformer',
-                        resume="allow",
+                        resume="must",
                         settings=wandb.Settings(start_method='fork'))
         else:
             print(f"Run ID: {wandb_id}")
             if opts.use_wandb:
                 wandb.init(id=wandb_id,
                         name=opts.wandb_name,
-                        project='test',
+                        project='MemoryInducedTransformer',
                         settings=wandb.Settings(start_method='fork'))
                 wandb.config.update({"run_id": wandb_id})
                 wandb.config.update(args)
@@ -390,18 +328,18 @@ def train(args, opts):
             exit()
 
         print(f"[INFO] epoch {epoch}")
-        loss_names = ['3d_pose', '3d_scale', '2d_proj', 'bio', '3d_velocity', 'lv', 'lg', 'angle', 'angle_velocity', 'total']
+        loss_names = ['3d_pose', '3d_scale', '2d_proj', 'lg', 'lv', '3d_velocity', 'angle', 'angle_velocity', 'total']
         losses = {name: AverageMeter() for name in loss_names}
 
-        train_one_epoch(args, (model, biomech_module), train_loader, optimizer, device, losses)
+        train_one_epoch(args, model, train_loader, optimizer, device, losses)
 
         mpjpe, p_mpjpe, joints_error, acceleration_error = evaluate(args, model, test_loader, datareader, device)
 
         if mpjpe < min_mpjpe:
             min_mpjpe = mpjpe
-            save_checkpoint(checkpoint_path_best, epoch, lr, optimizer, model, biomech_module, min_mpjpe, wandb_id)
+            save_checkpoint(checkpoint_path_best, epoch, lr, optimizer, model, min_mpjpe, wandb_id)
             print('save the best checkpoint at : {} !'.format(epoch))
-        save_checkpoint(checkpoint_path_latest, epoch, lr, optimizer, model, biomech_module, min_mpjpe, wandb_id)
+        save_checkpoint(checkpoint_path_latest, epoch, lr, optimizer, model, min_mpjpe, wandb_id)
 
         joint_label_errors = {}
         for joint_idx in range(args.num_joints):
@@ -413,7 +351,8 @@ def train(args, opts):
                 'train/loss_3d_scale': losses['3d_scale'].avg,
                 'train/loss_3d_velocity': losses['3d_velocity'].avg,
                 'train/loss_2d_proj': losses['2d_proj'].avg,
-                'train/loss_bio': losses['bio'].avg,
+                'train/loss_lg': losses['lg'].avg,
+                'train/loss_lv': losses['lv'].avg,
                 'train/loss_angle': losses['angle'].avg,
                 'train/angle_velocity': losses['angle_velocity'].avg,
                 'train/total': losses['total'].avg,
