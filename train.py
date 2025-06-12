@@ -328,33 +328,31 @@ def save_checkpoint_to_wandb(checkpoint_path, epoch, mpjpe, is_best=False, use_w
     except Exception as e:
         print(f"[WARN] Failed to upload checkpoint to wandb: {e}")
 
-def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint", project_name="MemoryInducedTransformer"):
-    """Download checkpoint from wandb artifact"""
+def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint"):
+    """Download checkpoint from wandb artifact without creating a new run"""
     try:
         import wandb
-
-        print(f"[INFO] Downloading checkpoint from wandb artifact: {artifact_name}")
-
-        # Check if wandb is already initialized
-        was_initialized = wandb.run is not None
-
-        # Initialize wandb with correct project name for downloading only if not already initialized
-        if not was_initialized:
-            wandb.init(project=project_name, job_type="download")
-
-        # Download artifact
-        artifact = wandb.use_artifact(artifact_name)
-        artifact_dir = artifact.download()
-
-        # Finish the download run only if we initialized it
-        if not was_initialized:
-            wandb.finish()
+        import glob
+        import shutil
 
         # Create checkpoint directory if it doesn't exist
         os.makedirs(checkpoint_dir, exist_ok=True)
 
+        # Check if checkpoint already exists locally
+        existing_checkpoints = glob.glob(os.path.join(checkpoint_dir, "*.pth.tr"))
+        if existing_checkpoints:
+            print(f"[INFO] Found existing checkpoint: {existing_checkpoints[0]}")
+            print(f"[INFO] Skipping download from wandb artifact: {artifact_name}")
+            return existing_checkpoints[0]
+
+        print(f"[INFO] No local checkpoint found, downloading from wandb artifact: {artifact_name}")
+
+        # Use wandb API to download artifact without creating a run
+        api = wandb.Api()
+        artifact = api.artifact(artifact_name)
+        artifact_dir = artifact.download()
+
         # Find the checkpoint file in the artifact
-        import glob
         checkpoint_files = glob.glob(os.path.join(artifact_dir, "*.pth.tr"))
 
         if not checkpoint_files:
@@ -365,7 +363,6 @@ def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint", p
         filename = os.path.basename(checkpoint_file)
         destination = os.path.join(checkpoint_dir, filename)
 
-        import shutil
         shutil.copy(checkpoint_file, destination)
 
         print(f"[INFO] Checkpoint downloaded successfully: {destination}")
