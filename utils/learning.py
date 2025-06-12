@@ -80,7 +80,7 @@ def decay_lr_exponentially(lr, lr_decay, optimizer):
 
 
 
-def load_model_TCPFormer(args):
+def load_model_TCPFormer(args, device='cpu'):
     act_mapper = {
         "gelu": nn.GELU,
         'relu': nn.ReLU,

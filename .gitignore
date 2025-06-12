@@ -1,0 +1,6 @@
+*.pkl
+
+*.pyc
+/data
+/checkpoint
+/wandb 

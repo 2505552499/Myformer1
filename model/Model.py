@@ -242,8 +242,7 @@ class MemoryInducedBlock(nn.Module):
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True),
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True)
         ]
-        for i in range(len(self.layer_scale)):
-            self.layer_scale[i] = self.layer_scale[i].to('cuda')
+        # Device will be set when the model is moved to device
         self.local_norms = nn.ModuleList([
             nn.LayerNorm(dim),
             nn.LayerNorm(dim),

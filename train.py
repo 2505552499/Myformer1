@@ -25,7 +25,38 @@ from torch.utils.data import DataLoader
 from utils.learning import AverageMeter, decay_lr_exponentially,load_model_TCPFormer
 from utils.tools import count_param_numbers
 from utils.data import Augmenter2D
-os.environ['CUDA_VISIBLE_DEVICES'] = '0' 
+
+def get_device():
+    """Get the best available device (XPU > CUDA > CPU)"""
+    try:
+        import intel_extension_for_pytorch as ipex
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            return 'xpu'
+    except ImportError:
+        pass
+
+    if torch.cuda.is_available():
+        return 'cuda'
+
+    return 'cpu'
+
+def setup_device_parallel(model, device):
+    """Setup model for device and parallel processing if available"""
+    if device == 'xpu':
+        try:
+            import intel_extension_for_pytorch as ipex
+            if hasattr(torch, 'xpu') and torch.xpu.device_count() > 1:
+                model = torch.nn.DataParallel(model)
+        except ImportError:
+            pass
+    elif device == 'cuda' and torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+
+    return model
+
+# Only set CUDA_VISIBLE_DEVICES if CUDA is available
+if torch.cuda.is_available():
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -40,7 +71,8 @@ def parse_args():
     parser.add_argument('--use-wandb', action='store_true')
     parser.add_argument('--wandb-name', default=None, type=str)
     parser.add_argument('--wandb-run-id', default=None, type=str)
-    parser.add_argument('--resume', default=True ,action='store_true')
+    parser.add_argument('--wandb-upload-freq', default=10, type=int, help='Upload checkpoint to wandb every N epochs')
+    parser.add_argument('--resume', action='store_true')
     parser.add_argument('--eval-only', action='store_true')
     opts = parser.parse_args()
     return opts
@@ -241,6 +273,42 @@ def save_checkpoint(checkpoint_path, epoch, lr, optimizer, model, min_mpjpe, wan
         'wandb_id': wandb_id,
     }, checkpoint_path)
 
+def save_checkpoint_to_wandb(checkpoint_path, epoch, mpjpe, is_best=False, use_wandb=False):
+    """Save checkpoint to wandb as artifact"""
+    if not use_wandb:
+        return
+
+    try:
+        import wandb
+
+        # Create artifact name based on checkpoint type
+        if is_best:
+            artifact_name = f"best_model_epoch_{epoch}"
+            artifact_description = f"Best model at epoch {epoch} with MPJPE: {mpjpe:.4f}mm"
+        else:
+            artifact_name = f"latest_model_epoch_{epoch}"
+            artifact_description = f"Latest model at epoch {epoch} with MPJPE: {mpjpe:.4f}mm"
+
+        # Create and upload artifact
+        artifact = wandb.Artifact(
+            name=artifact_name,
+            type='model',
+            description=artifact_description,
+            metadata={
+                'epoch': epoch,
+                'mpjpe': mpjpe,
+                'is_best': is_best
+            }
+        )
+
+        artifact.add_file(checkpoint_path)
+        wandb.log_artifact(artifact)
+
+        print(f"[INFO] Checkpoint uploaded to wandb: {artifact_name}")
+
+    except Exception as e:
+        print(f"[WARN] Failed to upload checkpoint to wandb: {e}")
+
 
 def train(args, opts):
     print_args(args)
@@ -264,10 +332,10 @@ def train(args, opts):
                                 data_stride_train=args.n_frames // 3, data_stride_test=args.n_frames,
                                 dt_root='data/motion3d', dt_file=args.dt_file)  # Used for H36m evaluation
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = load_model_TCPFormer(args)
-    if torch.cuda.is_available():
-        model = torch.nn.DataParallel(model)
+    device = get_device()
+    print(f"[INFO] Using device: {device}")
+    model = load_model_TCPFormer(args, device)
+    model = setup_device_parallel(model, device)
     model.to(device)
 
 
@@ -286,7 +354,7 @@ def train(args, opts):
     if opts.checkpoint:
         checkpoint_path = os.path.join(opts.checkpoint, opts.checkpoint_file if opts.checkpoint_file else "latest_epoch.pth.tr")
         if os.path.exists(checkpoint_path):
-            checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage, weights_only=False)
+            checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
             model.load_state_dict(checkpoint['model'], strict=True)
 
             if opts.resume:
@@ -303,10 +371,16 @@ def train(args, opts):
     if not opts.eval_only:
         if opts.resume:
             if opts.use_wandb:
+                # Use "allow" instead of "must" to handle cases where run doesn't exist yet
                 wandb.init(id=wandb_id,
                         project='MemoryInducedTransformer',
-                        resume="must",
+                        resume="allow",
                         settings=wandb.Settings(start_method='fork'))
+                # Update config in case this is a new run
+                wandb.config.update({"run_id": wandb_id})
+                wandb.config.update(args)
+                installed_packages = {d.project_name: d.version for d in pkg_resources.working_set}
+                wandb.config.update({'installed_packages': installed_packages})
         else:
             print(f"Run ID: {wandb_id}")
             if opts.use_wandb:
@@ -339,7 +413,15 @@ def train(args, opts):
             min_mpjpe = mpjpe
             save_checkpoint(checkpoint_path_best, epoch, lr, optimizer, model, min_mpjpe, wandb_id)
             print('save the best checkpoint at : {} !'.format(epoch))
+            # Upload best checkpoint to wandb
+            save_checkpoint_to_wandb(checkpoint_path_best, epoch, mpjpe, is_best=True, use_wandb=opts.use_wandb)
+
         save_checkpoint(checkpoint_path_latest, epoch, lr, optimizer, model, min_mpjpe, wandb_id)
+
+        # Upload latest checkpoint to wandb every N epochs or at the end
+        should_upload_latest = (epoch + 1) % opts.wandb_upload_freq == 0 or (epoch + 1) == args.epochs
+        if should_upload_latest:
+            save_checkpoint_to_wandb(checkpoint_path_latest, epoch, mpjpe, is_best=False, use_wandb=opts.use_wandb)
 
         joint_label_errors = {}
         for joint_idx in range(args.num_joints):
@@ -370,11 +452,9 @@ def train(args, opts):
 
         lr = decay_lr_exponentially(lr, lr_decay, optimizer)
 
+    # Final checkpoint upload is handled during training loop
     if opts.use_wandb:
-        artifact = wandb.Artifact(f'model', type='model')
-        artifact.add_file(checkpoint_path_latest)
-        artifact.add_file(checkpoint_path_best)
-        wandb.log_artifact(artifact)
+        print("[INFO] All checkpoints have been uploaded to wandb during training")
 
 
 def main():
