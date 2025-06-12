@@ -28,16 +28,34 @@ from utils.data import Augmenter2D
 
 def get_device():
     """Get the best available device (XPU > CUDA > CPU)"""
+    print("[DEBUG] Checking available devices...")
+
+    # Check for Intel XPU
     try:
         import intel_extension_for_pytorch as ipex
-        if hasattr(torch, 'xpu') and torch.xpu.is_available():
-            return 'xpu'
-    except ImportError:
-        pass
+        print("[DEBUG] Intel Extension for PyTorch imported successfully")
+        if hasattr(torch, 'xpu'):
+            print("[DEBUG] torch.xpu is available")
+            if torch.xpu.is_available():
+                device_count = torch.xpu.device_count()
+                print(f"[DEBUG] XPU devices found: {device_count}")
+                return 'xpu'
+            else:
+                print("[DEBUG] torch.xpu.is_available() returned False")
+        else:
+            print("[DEBUG] torch.xpu is not available")
+    except ImportError as e:
+        print(f"[DEBUG] Intel Extension for PyTorch not available: {e}")
 
+    # Check for CUDA
     if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+        print(f"[DEBUG] CUDA devices found: {device_count}")
         return 'cuda'
+    else:
+        print("[DEBUG] CUDA not available")
 
+    print("[DEBUG] Falling back to CPU")
     return 'cpu'
 
 def setup_device_parallel(model, device):
