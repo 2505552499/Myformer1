@@ -335,16 +335,20 @@ def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint", p
 
         print(f"[INFO] Downloading checkpoint from wandb artifact: {artifact_name}")
 
-        # Initialize wandb with correct project name for downloading only
-        if not wandb.run:
+        # Check if wandb is already initialized
+        was_initialized = wandb.run is not None
+
+        # Initialize wandb with correct project name for downloading only if not already initialized
+        if not was_initialized:
             wandb.init(project=project_name, job_type="download")
 
         # Download artifact
         artifact = wandb.use_artifact(artifact_name)
         artifact_dir = artifact.download()
 
-        # Finish the download run
-        wandb.finish()
+        # Finish the download run only if we initialized it
+        if not was_initialized:
+            wandb.finish()
 
         # Create checkpoint directory if it doesn't exist
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -453,11 +457,11 @@ def train(args, opts):
                         project='MemoryInducedTransformer',
                         resume="allow",
                         settings=wandb.Settings(start_method='fork'))
-                # Update config in case this is a new run
-                wandb.config.update({"run_id": wandb_id})
-                wandb.config.update(args)
+                # Update config in case this is a new run - allow value changes for resume
+                wandb.config.update({"run_id": wandb_id}, allow_val_change=True)
+                wandb.config.update(args, allow_val_change=True)
                 installed_packages = {d.project_name: d.version for d in pkg_resources.working_set}
-                wandb.config.update({'installed_packages': installed_packages})
+                wandb.config.update({'installed_packages': installed_packages}, allow_val_change=True)
         else:
             print(f"Run ID: {wandb_id}")
             if opts.use_wandb:
