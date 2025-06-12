@@ -328,20 +328,23 @@ def save_checkpoint_to_wandb(checkpoint_path, epoch, mpjpe, is_best=False, use_w
     except Exception as e:
         print(f"[WARN] Failed to upload checkpoint to wandb: {e}")
 
-def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint"):
+def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint", project_name="MemoryInducedTransformer"):
     """Download checkpoint from wandb artifact"""
     try:
         import wandb
 
         print(f"[INFO] Downloading checkpoint from wandb artifact: {artifact_name}")
 
-        # Initialize wandb if not already initialized
+        # Initialize wandb with correct project name for downloading only
         if not wandb.run:
-            wandb.init()
+            wandb.init(project=project_name, job_type="download")
 
         # Download artifact
         artifact = wandb.use_artifact(artifact_name)
         artifact_dir = artifact.download()
+
+        # Finish the download run
+        wandb.finish()
 
         # Create checkpoint directory if it doesn't exist
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -408,7 +411,7 @@ def train(args, opts):
     lr_decay = args.lr_decay
     epoch_start = 0
     min_mpjpe = float('inf')  # Used for storing the best model
-    wandb_id = opts.wandb_run_id if opts.wandb_run_id is not None else wandb.util.generate_id()
+    wandb_id = None  # Will be set after checkpoint loading
 
     # Download checkpoint from wandb if specified
     if opts.wandb_artifact:
@@ -429,11 +432,18 @@ def train(args, opts):
                 epoch_start = checkpoint['epoch']
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 min_mpjpe = checkpoint['min_mpjpe']
+                # Try to get wandb_id from checkpoint first
                 if 'wandb_id' in checkpoint and opts.wandb_run_id is None:
                     wandb_id = checkpoint['wandb_id']
+                    print(f"[INFO] Resuming with wandb_id from checkpoint: {wandb_id}")
         else:
             print("[WARN] Checkpoint path is empty. Starting from the beginning")
             opts.resume = False
+
+    # Set wandb_id if not already set from checkpoint
+    if wandb_id is None:
+        wandb_id = opts.wandb_run_id if opts.wandb_run_id is not None else wandb.util.generate_id()
+        print(f"[INFO] Using wandb_id: {wandb_id}")
 
     if not opts.eval_only:
         if opts.resume:
