@@ -90,6 +90,7 @@ def parse_args():
     parser.add_argument('--wandb-name', default=None, type=str)
     parser.add_argument('--wandb-run-id', default=None, type=str)
     parser.add_argument('--wandb-upload-freq', default=10, type=int, help='Upload checkpoint to wandb every N epochs')
+    parser.add_argument('--wandb-artifact', default=None, type=str, help='Download checkpoint from wandb artifact (format: entity/project/artifact_name:version)')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--eval-only', action='store_true')
     opts = parser.parse_args()
@@ -327,6 +328,46 @@ def save_checkpoint_to_wandb(checkpoint_path, epoch, mpjpe, is_best=False, use_w
     except Exception as e:
         print(f"[WARN] Failed to upload checkpoint to wandb: {e}")
 
+def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint"):
+    """Download checkpoint from wandb artifact"""
+    try:
+        import wandb
+
+        print(f"[INFO] Downloading checkpoint from wandb artifact: {artifact_name}")
+
+        # Initialize wandb if not already initialized
+        if not wandb.run:
+            wandb.init()
+
+        # Download artifact
+        artifact = wandb.use_artifact(artifact_name)
+        artifact_dir = artifact.download()
+
+        # Create checkpoint directory if it doesn't exist
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        # Find the checkpoint file in the artifact
+        import glob
+        checkpoint_files = glob.glob(os.path.join(artifact_dir, "*.pth.tr"))
+
+        if not checkpoint_files:
+            raise FileNotFoundError("No .pth.tr files found in the artifact")
+
+        # Copy the checkpoint file to the checkpoint directory
+        checkpoint_file = checkpoint_files[0]
+        filename = os.path.basename(checkpoint_file)
+        destination = os.path.join(checkpoint_dir, filename)
+
+        import shutil
+        shutil.copy(checkpoint_file, destination)
+
+        print(f"[INFO] Checkpoint downloaded successfully: {destination}")
+        return destination
+
+    except Exception as e:
+        print(f"[ERROR] Failed to download checkpoint from wandb: {e}")
+        return None
+
 
 def train(args, opts):
     print_args(args)
@@ -368,6 +409,14 @@ def train(args, opts):
     epoch_start = 0
     min_mpjpe = float('inf')  # Used for storing the best model
     wandb_id = opts.wandb_run_id if opts.wandb_run_id is not None else wandb.util.generate_id()
+
+    # Download checkpoint from wandb if specified
+    if opts.wandb_artifact:
+        downloaded_checkpoint = download_checkpoint_from_wandb(opts.wandb_artifact, opts.new_checkpoint)
+        if downloaded_checkpoint:
+            opts.checkpoint = opts.new_checkpoint
+            opts.checkpoint_file = os.path.basename(downloaded_checkpoint)
+            print(f"[INFO] Using downloaded checkpoint: {opts.checkpoint_file}")
 
     if opts.checkpoint:
         checkpoint_path = os.path.join(opts.checkpoint, opts.checkpoint_file if opts.checkpoint_file else "latest_epoch.pth.tr")
