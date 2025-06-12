@@ -234,15 +234,14 @@ class MemoryInducedBlock(nn.Module):
         self.loacl_mlps =  nn.ModuleList([
                 MLP(in_features=dim,hidden_features=mlp_hidden_dim,act_layer=act_layer,drop=drop) for i in range(3)
             ])
-        self.layer_scale =[
+        self.layer_scale = nn.ParameterList([
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True),
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True),
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True),
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True),
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True),
             nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True)
-        ]
-        # Device will be set when the model is moved to device
+        ])
         self.local_norms = nn.ModuleList([
             nn.LayerNorm(dim),
             nn.LayerNorm(dim),
