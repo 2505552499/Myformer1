@@ -25,6 +25,13 @@ from torch.utils.data import DataLoader
 from utils.learning import AverageMeter, decay_lr_exponentially,load_model_TCPFormer
 from utils.tools import count_param_numbers
 from utils.data import Augmenter2D
+from utils.wandb_utils import (
+    save_checkpoint,
+    save_checkpoint_to_wandb,
+    download_checkpoint_from_wandb,
+    init_wandb_for_resume,
+    init_wandb_for_new_run
+)
 
 def get_device():
     """Get the best available device (XPU > CUDA > CPU)"""
@@ -282,96 +289,6 @@ def evaluate(args, model, test_loader, datareader, device):
     return e1, e2, joint_errors, acceleration_error
 
 
-def save_checkpoint(checkpoint_path, epoch, lr, optimizer, model, min_mpjpe, wandb_id):
-    torch.save({
-        'epoch': epoch + 1,
-        'lr': lr,
-        'optimizer': optimizer.state_dict(),
-        'model': model.state_dict(),
-        'min_mpjpe': min_mpjpe,
-        'wandb_id': wandb_id,
-    }, checkpoint_path)
-
-def save_checkpoint_to_wandb(checkpoint_path, epoch, mpjpe, is_best=False, use_wandb=False):
-    """Save checkpoint to wandb as artifact"""
-    if not use_wandb:
-        return
-
-    try:
-        import wandb
-
-        # Create artifact name based on checkpoint type
-        if is_best:
-            artifact_name = f"best_model_epoch_{epoch}"
-            artifact_description = f"Best model at epoch {epoch} with MPJPE: {mpjpe:.4f}mm"
-        else:
-            artifact_name = f"latest_model_epoch_{epoch}"
-            artifact_description = f"Latest model at epoch {epoch} with MPJPE: {mpjpe:.4f}mm"
-
-        # Create and upload artifact
-        artifact = wandb.Artifact(
-            name=artifact_name,
-            type='model',
-            description=artifact_description,
-            metadata={
-                'epoch': epoch,
-                'mpjpe': mpjpe,
-                'is_best': is_best
-            }
-        )
-
-        artifact.add_file(checkpoint_path)
-        wandb.log_artifact(artifact)
-
-        print(f"[INFO] Checkpoint uploaded to wandb: {artifact_name}")
-
-    except Exception as e:
-        print(f"[WARN] Failed to upload checkpoint to wandb: {e}")
-
-def download_checkpoint_from_wandb(artifact_name, checkpoint_dir="checkpoint"):
-    """Download checkpoint from wandb artifact without creating a new run"""
-    try:
-        import wandb
-        import glob
-        import shutil
-
-        # Create checkpoint directory if it doesn't exist
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
-        # Check if checkpoint already exists locally
-        existing_checkpoints = glob.glob(os.path.join(checkpoint_dir, "*.pth.tr"))
-        if existing_checkpoints:
-            print(f"[INFO] Found existing checkpoint: {existing_checkpoints[0]}")
-            print(f"[INFO] Skipping download from wandb artifact: {artifact_name}")
-            return existing_checkpoints[0]
-
-        print(f"[INFO] No local checkpoint found, downloading from wandb artifact: {artifact_name}")
-
-        # Use wandb API to download artifact without creating a run
-        api = wandb.Api()
-        artifact = api.artifact(artifact_name)
-        artifact_dir = artifact.download()
-
-        # Find the checkpoint file in the artifact
-        checkpoint_files = glob.glob(os.path.join(artifact_dir, "*.pth.tr"))
-
-        if not checkpoint_files:
-            raise FileNotFoundError("No .pth.tr files found in the artifact")
-
-        # Copy the checkpoint file to the checkpoint directory
-        checkpoint_file = checkpoint_files[0]
-        filename = os.path.basename(checkpoint_file)
-        destination = os.path.join(checkpoint_dir, filename)
-
-        shutil.copy(checkpoint_file, destination)
-
-        print(f"[INFO] Checkpoint downloaded successfully: {destination}")
-        return destination
-
-    except Exception as e:
-        print(f"[ERROR] Failed to download checkpoint from wandb: {e}")
-        return None
-
 
 def train(args, opts):
     print_args(args)
@@ -449,27 +366,11 @@ def train(args, opts):
     if not opts.eval_only:
         if opts.resume:
             if opts.use_wandb:
-                # Use "allow" instead of "must" to handle cases where run doesn't exist yet
-                wandb.init(id=wandb_id,
-                        project='MemoryInducedTransformer',
-                        resume="allow",
-                        settings=wandb.Settings(start_method='fork'))
-                # Update config in case this is a new run - allow value changes for resume
-                wandb.config.update({"run_id": wandb_id}, allow_val_change=True)
-                wandb.config.update(args, allow_val_change=True)
-                installed_packages = {d.project_name: d.version for d in pkg_resources.working_set}
-                wandb.config.update({'installed_packages': installed_packages}, allow_val_change=True)
+                init_wandb_for_resume(wandb_id, args=args)
         else:
             print(f"Run ID: {wandb_id}")
             if opts.use_wandb:
-                wandb.init(id=wandb_id,
-                        name=opts.wandb_name,
-                        project='MemoryInducedTransformer',
-                        settings=wandb.Settings(start_method='fork'))
-                wandb.config.update({"run_id": wandb_id})
-                wandb.config.update(args)
-                installed_packages = {d.project_name: d.version for d in pkg_resources.working_set}
-                wandb.config.update({'installed_packages': installed_packages})
+                init_wandb_for_new_run(wandb_id, wandb_name=opts.wandb_name, args=args)
 
     checkpoint_path_latest = os.path.join(opts.new_checkpoint, 'latest_epoch.pth.tr')
     checkpoint_path_best = os.path.join(opts.new_checkpoint, 'best_epoch.pth.tr')
