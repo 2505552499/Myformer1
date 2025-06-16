@@ -10,6 +10,7 @@ from model.modules.attention import Attention
 from model.modules.mlp import MLP
 from model.modules.crossattention import CrossAttention
 from model.modules.ModelBlock import MIBlock
+from model.modules.joint_flow import JointFlow
 os.environ['CUDA_VISIBLE_DEVICES'] = '0' 
 
 
@@ -341,9 +342,20 @@ class MemoryInducedTransformer(nn.Module):
                  drop=0., drop_path=0., use_layer_scale=True, layer_scale_init_value=1e-5, use_adaptive_fusion=True,
                  num_heads=4, qkv_bias=False, qkv_scale=None, hierarchical=False, num_joints=17,
                  use_temporal_similarity=True, temporal_connection_len=1, use_tcn=False, graph_only=False,
-                 neighbour_num=4, n_frames=243):
+                 neighbour_num=4, n_frames=243, use_joint_flow=True, motion_dim=32, joint_flow_dropout=0.1):
 
         super().__init__()
+
+        # JointFlow motion encoding module
+        self.use_joint_flow = use_joint_flow
+        if use_joint_flow:
+            self.joint_flow = JointFlow(
+                dim_in=dim_in,
+                motion_dim=motion_dim,
+                use_velocity=True,
+                use_acceleration=True,
+                dropout=joint_flow_dropout
+            )
 
         self.joints_embed = nn.Linear(dim_in, dim_feat)
         self.pos_embed = nn.Parameter(torch.zeros(1, num_joints, dim_feat))
@@ -408,6 +420,11 @@ class MemoryInducedTransformer(nn.Module):
         :param x: tensor with shape [B, T, J, C] (T=243, J=17, C=3)
         """
         b,t,j,c = x.shape
+
+        # Apply JointFlow motion enhancement at input layer
+        if self.use_joint_flow:
+            x = self.joint_flow(x)
+
         pose_query = self.center_pose.unsqueeze(0).repeat(b,1,1,1)
         pose_query = pose_query + self.center_pos_embed
         x = self.joints_embed(x)  #
@@ -430,14 +447,14 @@ class MemoryInducedTransformer(nn.Module):
 
 def _test():
     torch.cuda.set_device(0)
-    from torchprofile import profile_macs
+    # from torchprofile import profile_macs  # Comment out if not available
     import warnings
     warnings.filterwarnings('ignore')
     b, c, t, j = 1, 3, 243, 17
     random_x = torch.randn((b, t, j, c)).to('cuda')
 
     model = MemoryInducedTransformer(n_layers=16, dim_in=3, dim_feat=128, mlp_ratio=4, hierarchical=False,
-                           use_tcn=False, graph_only=False, n_frames=t).to('cuda')
+                           use_tcn=False, graph_only=False, n_frames=t, use_joint_flow=True, motion_dim=32).to('cuda')
     model.eval()
 
     model_params = 0
