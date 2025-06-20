@@ -6,8 +6,8 @@ lr_decay: 0.99
 epochs: 90
 train_2d: False
 
-# Model
-model_name: MemoryInducedTransformer  # or OptimizedTCPFormer for the new architecture
+# Model - Frequency-Enhanced TCPFormer
+model_name: OptimizedTCPFormer
 n_layers: 16
 dim_in: 3
 dim_feat: 128
@@ -30,12 +30,12 @@ neighbour_num: 2
 temporal_connection_len: 1 
 use_tcn: False
 graph_only: False
-n_frames: 243
+n_frames: 243 
 
-# Frequency Enhancement
-use_frequency_aware: True
-use_frequency_enhanced: True
-freq_ratio: 0.5
+# Frequency Enhancement Parameters
+freq_ratio: 0.5              # General frequency ratio
+dst_freq_ratio: 0.3          # DSTFormer frequency ratio (lower for more global info)
+memory_freq_ratio: 0.7       # MemoryInduced frequency ratio (higher for local details)
 
 # Data
 data_root: data/motion3d/

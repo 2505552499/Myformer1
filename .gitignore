@@ -4,3 +4,4 @@
 /data
 /checkpoint
 /wandb 
+*.tr

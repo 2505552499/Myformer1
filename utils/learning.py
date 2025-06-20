@@ -1,5 +1,5 @@
 
-from model.Model import MemoryInducedTransformer
+from model.Model import MemoryInducedTransformer, OptimizedTCPFormer
 from utils.activation import SymSum
 from torch import nn
 import torch
@@ -111,7 +111,44 @@ def load_model_TCPFormer(args, device='cpu'):
                                use_tcn=args.use_tcn,
                                graph_only=args.graph_only,
                                neighbour_num=args.neighbour_num,
-                               n_frames=args.n_frames)
+                               n_frames=args.n_frames,
+                               use_joint_flow=getattr(args, 'use_joint_flow', True),
+                               motion_dim=getattr(args, 'motion_dim', 64),
+                               joint_flow_dropout=getattr(args, 'joint_flow_dropout', 0.1),
+                               use_frequency_aware=getattr(args, 'use_frequency_aware', False),
+                               freq_ratio=getattr(args, 'freq_ratio', 0.5),
+                               use_frequency_enhanced=getattr(args, 'use_frequency_enhanced', False))
+    elif args.model_name == "OptimizedTCPFormer":
+        model = OptimizedTCPFormer(n_layers=args.n_layers,
+                               dim_in=args.dim_in,
+                               dim_feat=args.dim_feat,
+                               dim_rep=args.dim_rep,
+                               dim_out=args.dim_out,
+                               mlp_ratio=args.mlp_ratio,
+                               act_layer=act_mapper[args.act_layer],
+                               attn_drop=args.attn_drop,
+                               drop=args.drop,
+                               drop_path=args.drop_path,
+                               use_layer_scale=args.use_layer_scale,
+                               layer_scale_init_value=args.layer_scale_init_value,
+                               use_adaptive_fusion=args.use_adaptive_fusion,
+                               num_heads=args.num_heads,
+                               qkv_bias=args.qkv_bias,
+                               qkv_scale=args.qkv_scale,
+                               hierarchical=args.hierarchical,
+                               num_joints=args.num_joints,
+                               use_temporal_similarity=args.use_temporal_similarity,
+                               temporal_connection_len=args.temporal_connection_len,
+                               use_tcn=args.use_tcn,
+                               graph_only=args.graph_only,
+                               neighbour_num=args.neighbour_num,
+                               n_frames=args.n_frames,
+                               use_joint_flow=getattr(args, 'use_joint_flow', True),
+                               motion_dim=getattr(args, 'motion_dim', 64),
+                               joint_flow_dropout=getattr(args, 'joint_flow_dropout', 0.1),
+                               freq_ratio=getattr(args, 'freq_ratio', 0.5),
+                               dst_freq_ratio=getattr(args, 'dst_freq_ratio', 0.3),
+                               memory_freq_ratio=getattr(args, 'memory_freq_ratio', 0.7))
     else:
         raise Exception("Undefined model name")
 
