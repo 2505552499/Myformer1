@@ -11,6 +11,7 @@ from model.modules.mlp import MLP
 from model.modules.crossattention import CrossAttention
 from model.modules.ModelBlock import MIBlock
 from model.modules.joint_flow import JointFlow
+from model.modules.enhanced_motion_flow import EnhancedMotionFlow
 os.environ['CUDA_VISIBLE_DEVICES'] = '0' 
 
 
@@ -342,13 +343,27 @@ class MemoryInducedTransformer(nn.Module):
                  drop=0., drop_path=0., use_layer_scale=True, layer_scale_init_value=1e-5, use_adaptive_fusion=True,
                  num_heads=4, qkv_bias=False, qkv_scale=None, hierarchical=False, num_joints=17,
                  use_temporal_similarity=True, temporal_connection_len=1, use_tcn=False, graph_only=False,
-                 neighbour_num=4, n_frames=243, use_joint_flow=True, motion_dim=32, joint_flow_dropout=0.1):
+                 neighbour_num=4, n_frames=243, use_joint_flow=True, motion_dim=64, joint_flow_dropout=0.1,
+                 use_enhanced_motion=False, temporal_scales=[1, 8, 25, 100], motion_output_high_dim=True):
 
         super().__init__()
 
-        # JointFlow motion encoding module
+        # Motion encoding module
         self.use_joint_flow = use_joint_flow
-        if use_joint_flow:
+        self.use_enhanced_motion = use_enhanced_motion
+        self.motion_output_high_dim = motion_output_high_dim
+
+        if use_enhanced_motion:
+            # Use enhanced motion flow with multi-scale temporal modeling
+            self.motion_flow = EnhancedMotionFlow(
+                dim_in=dim_in,
+                motion_dim=motion_dim,
+                dropout=joint_flow_dropout,
+                temporal_scales=temporal_scales,
+                output_high_dim=motion_output_high_dim
+            )
+        elif use_joint_flow:
+            # Use basic joint flow
             self.joint_flow = JointFlow(
                 dim_in=dim_in,
                 motion_dim=motion_dim,
@@ -357,7 +372,11 @@ class MemoryInducedTransformer(nn.Module):
                 dropout=joint_flow_dropout
             )
 
-        self.joints_embed = nn.Linear(dim_in, dim_feat)
+        # Embedding - adapt to motion flow output dimension
+        if use_enhanced_motion and motion_output_high_dim:
+            self.joints_embed = nn.Linear(motion_dim, dim_feat)
+        else:
+            self.joints_embed = nn.Linear(dim_in, dim_feat)
         self.pos_embed = nn.Parameter(torch.zeros(1, num_joints, dim_feat))
         self.norm = nn.LayerNorm(dim_feat)
         self.layers_num = n_layers
@@ -421,8 +440,10 @@ class MemoryInducedTransformer(nn.Module):
         """
         b,t,j,c = x.shape
 
-        # Apply JointFlow motion enhancement at input layer
-        if self.use_joint_flow:
+        # Apply motion enhancement at input layer
+        if self.use_enhanced_motion:
+            x = self.motion_flow(x)
+        elif self.use_joint_flow:
             x = self.joint_flow(x)
 
         pose_query = self.center_pose.unsqueeze(0).repeat(b,1,1,1)
