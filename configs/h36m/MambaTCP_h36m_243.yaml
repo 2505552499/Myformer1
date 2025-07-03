@@ -1,0 +1,88 @@
+#Training
+learning_rate: 0.0005
+batch_size: 2
+weight_decay: 0.01
+lr_decay: 0.99
+epochs: 90
+train_2d: False
+
+# Model - Mamba-Enhanced TCPFormer
+model_name: MambaInducedTransformer
+n_layers: 16
+dim_in: 3
+dim_feat: 128
+dim_rep: 512
+dim_out: 3
+mlp_ratio: 4
+act_layer: gelu
+attn_drop: 0.0
+drop: 0.0
+drop_path: 0.0
+use_layer_scale: True
+layer_scale_init_value: 0.00001
+use_adaptive_fusion: True
+num_heads: 8
+qkv_bias: False
+qkv_scale: null
+hierarchical: False
+use_temporal_similarity: True 
+neighbour_num: 2  
+temporal_connection_len: 1 
+use_tcn: False
+graph_only: False
+n_frames: 243 
+
+# Mamba-specific parameters
+use_mamba_enhanced: True
+mamba_d_state: 16
+mamba_d_conv: 4
+mamba_expand: 2
+use_geometric_reorder: True
+use_bidirectional: True
+use_local_mamba: True
+
+# Data
+data_root: data/motion3d/
+data_root_2d: data/motion2d/
+subset_list: [ H36M-243 ]
+dt_file: h36m_sh_conf_cam_source_final.pkl
+num_joints: 17
+root_rel: True 
+add_velocity: False
+
+# Loss weights
+lambda_3d_pos: 1.0
+lambda_scale: 0.1
+lambda_3d_velocity: 0.1
+lambda_lv: 0.1
+lambda_lg: 0.1
+lambda_a: 0.1
+lambda_av: 0.1
+
+# Evaluation
+eval_joints: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+flip: True
+test_augmentation: True
+
+# Checkpoint and logging
+checkpoint_dir: checkpoint/mamba_tcp/
+log_dir: logs/mamba_tcp/
+save_frequency: 10
+eval_frequency: 1
+
+# Wandb settings
+use_wandb: True
+wandb_project: "MambaTCP-H36M"
+wandb_entity: "pose-estimation"
+wandb_name: "MambaTCP-243frames"
+
+# Hardware settings
+num_workers: 8
+pin_memory: True
+prefetch_factor: 2
+persistent_workers: True
+
+# Debug settings
+debug_mode: False
+profile_model: False
+check_gradients: False

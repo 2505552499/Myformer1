@@ -285,7 +285,9 @@ class MemoryInducedBlock(nn.Module):
 def create_layers(dim, n_layers, mlp_ratio=4., act_layer=nn.GELU, attn_drop=0., drop_rate=0., drop_path_rate=0.,
                   num_heads=8, use_layer_scale=True, qkv_bias=False, qkv_scale=None, layer_scale_init_value=1e-5,
                   use_adaptive_fusion=True, hierarchical=False, use_temporal_similarity=True,
-                  temporal_connection_len=1, use_tcn=False, graph_only=False, neighbour_num=4, n_frames=243,type = None):
+                  temporal_connection_len=1, use_tcn=False, graph_only=False, neighbour_num=4, n_frames=243, type=None,
+                  # Mamba相关参数
+                  use_mamba_enhanced=False, mamba_d_state=16, mamba_d_conv=4, mamba_expand=2):
 
     layers = []
     for _ in range(n_layers):
@@ -310,25 +312,53 @@ def create_layers(dim, n_layers, mlp_ratio=4., act_layer=nn.GELU, attn_drop=0., 
                                           neighbour_num=neighbour_num,
                                           n_frames=n_frames))
         else:
-            layers.append(DSTFormerBlock(dim=dim,
-                                          mlp_ratio=mlp_ratio,
-                                          act_layer=act_layer,
-                                          attn_drop=attn_drop,
-                                          drop=drop_rate,
-                                          drop_path=drop_path_rate,
-                                          num_heads=num_heads,
-                                          use_layer_scale=use_layer_scale,
-                                          layer_scale_init_value=layer_scale_init_value,
-                                          qkv_bias=qkv_bias,
-                                          qk_scale=qkv_scale,
-                                          use_adaptive_fusion=use_adaptive_fusion,
-                                          hierarchical=hierarchical,
-                                          use_temporal_similarity=use_temporal_similarity,
-                                          temporal_connection_len=temporal_connection_len,
-                                          use_tcn=use_tcn,
-                                          graph_only=graph_only,
-                                          neighbour_num=neighbour_num,
-                                          n_frames=n_frames))
+            # 根据配置选择使用Mamba增强版本或原始DSTFormerBlock
+            if use_mamba_enhanced:
+                from model.modules.mamba_enhanced_block import MambaEnhancedBlock
+                layers.append(MambaEnhancedBlock(dim=dim,
+                                              mlp_ratio=mlp_ratio,
+                                              act_layer=act_layer,
+                                              drop=drop_rate,
+                                              drop_path=drop_path_rate,
+                                              use_layer_scale=use_layer_scale,
+                                              layer_scale_init_value=layer_scale_init_value,
+                                              use_adaptive_fusion=use_adaptive_fusion,
+                                              n_frames=n_frames,
+                                              num_joints=17,  # Human3.6M关节数
+                                              d_state=mamba_d_state,
+                                              d_conv=mamba_d_conv,
+                                              expand=mamba_expand,
+                                              # 保持兼容性的参数
+                                              num_heads=num_heads,
+                                              qkv_bias=qkv_bias,
+                                              qk_scale=qkv_scale,
+                                              hierarchical=hierarchical,
+                                              use_temporal_similarity=use_temporal_similarity,
+                                              temporal_connection_len=temporal_connection_len,
+                                              use_tcn=use_tcn,
+                                              graph_only=graph_only,
+                                              neighbour_num=neighbour_num,
+                                              attn_drop=attn_drop))
+            else:
+                layers.append(DSTFormerBlock(dim=dim,
+                                              mlp_ratio=mlp_ratio,
+                                              act_layer=act_layer,
+                                              attn_drop=attn_drop,
+                                              drop=drop_rate,
+                                              drop_path=drop_path_rate,
+                                              num_heads=num_heads,
+                                              use_layer_scale=use_layer_scale,
+                                              layer_scale_init_value=layer_scale_init_value,
+                                              qkv_bias=qkv_bias,
+                                              qk_scale=qkv_scale,
+                                              use_adaptive_fusion=use_adaptive_fusion,
+                                              hierarchical=hierarchical,
+                                              use_temporal_similarity=use_temporal_similarity,
+                                              temporal_connection_len=temporal_connection_len,
+                                              use_tcn=use_tcn,
+                                              graph_only=graph_only,
+                                              neighbour_num=neighbour_num,
+                                              n_frames=n_frames))
     layers = nn.Sequential(*layers)
 
     return layers
@@ -341,7 +371,9 @@ class MemoryInducedTransformer(nn.Module):
                  drop=0., drop_path=0., use_layer_scale=True, layer_scale_init_value=1e-5, use_adaptive_fusion=True,
                  num_heads=4, qkv_bias=False, qkv_scale=None, hierarchical=False, num_joints=17,
                  use_temporal_similarity=True, temporal_connection_len=1, use_tcn=False, graph_only=False,
-                 neighbour_num=4, n_frames=243):
+                 neighbour_num=4, n_frames=243,
+                 # Mamba相关参数
+                 use_mamba_enhanced=False, mamba_d_state=16, mamba_d_conv=4, mamba_expand=2):
 
         super().__init__()
 
@@ -368,7 +400,12 @@ class MemoryInducedTransformer(nn.Module):
                                     use_tcn=use_tcn,
                                     graph_only=graph_only,
                                     neighbour_num=neighbour_num,
-                                    n_frames=n_frames)
+                                    n_frames=n_frames,
+                                    # Mamba参数
+                                    use_mamba_enhanced=use_mamba_enhanced,
+                                    mamba_d_state=mamba_d_state,
+                                    mamba_d_conv=mamba_d_conv,
+                                    mamba_expand=mamba_expand)
 
         self.rep_logit = nn.Sequential(OrderedDict([
             ('fc', nn.Linear(dim_feat, dim_rep)),
@@ -426,6 +463,61 @@ class MemoryInducedTransformer(nn.Module):
         x = self.head(x)
 
         return x
+
+
+class MambaInducedTransformer(MemoryInducedTransformer):
+    """
+    Mamba-Enhanced TCPFormer
+    继承自MemoryInducedTransformer，使用MambaEnhancedBlock替换DSTFormerBlock
+    """
+    def __init__(self, n_layers, dim_in, dim_feat, dim_rep=512, dim_out=3, mlp_ratio=4, act_layer=nn.GELU, attn_drop=0.,
+                 drop=0., drop_path=0., use_layer_scale=True, layer_scale_init_value=1e-5, use_adaptive_fusion=True,
+                 num_heads=4, qkv_bias=False, qkv_scale=None, hierarchical=False, num_joints=17,
+                 use_temporal_similarity=True, temporal_connection_len=1, use_tcn=False, graph_only=False,
+                 neighbour_num=4, n_frames=243,
+                 # Mamba特定参数
+                 mamba_d_state=16, mamba_d_conv=4, mamba_expand=2,
+                 use_geometric_reorder=True, use_bidirectional=True, use_local_mamba=True):
+
+        # 强制启用Mamba增强
+        super().__init__(
+            n_layers=n_layers, dim_in=dim_in, dim_feat=dim_feat, dim_rep=dim_rep, dim_out=dim_out,
+            mlp_ratio=mlp_ratio, act_layer=act_layer, attn_drop=attn_drop, drop=drop, drop_path=drop_path,
+            use_layer_scale=use_layer_scale, layer_scale_init_value=layer_scale_init_value,
+            use_adaptive_fusion=use_adaptive_fusion, num_heads=num_heads, qkv_bias=qkv_bias, qkv_scale=qkv_scale,
+            hierarchical=hierarchical, num_joints=num_joints, use_temporal_similarity=use_temporal_similarity,
+            temporal_connection_len=temporal_connection_len, use_tcn=use_tcn, graph_only=graph_only,
+            neighbour_num=neighbour_num, n_frames=n_frames,
+            # 强制启用Mamba
+            use_mamba_enhanced=True,
+            mamba_d_state=mamba_d_state,
+            mamba_d_conv=mamba_d_conv,
+            mamba_expand=mamba_expand
+        )
+
+        # 保存Mamba配置用于调试
+        self.mamba_config = {
+            'mamba_d_state': mamba_d_state,
+            'mamba_d_conv': mamba_d_conv,
+            'mamba_expand': mamba_expand,
+            'use_geometric_reorder': use_geometric_reorder,
+            'use_bidirectional': use_bidirectional,
+            'use_local_mamba': use_local_mamba
+        }
+
+        print(f"[INFO] MambaInducedTransformer initialized with config: {self.mamba_config}")
+
+    def get_model_info(self):
+        """获取模型信息"""
+        info = {
+            'model_type': 'MambaInducedTransformer',
+            'n_layers': self.layers_num,
+            'dim_feat': self.joints_embed.out_features,
+            'mamba_config': self.mamba_config,
+            'total_params': sum(p.numel() for p in self.parameters()),
+            'trainable_params': sum(p.numel() for p in self.parameters() if p.requires_grad)
+        }
+        return info
 
 
 def _test():
