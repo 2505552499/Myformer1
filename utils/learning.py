@@ -1,5 +1,5 @@
 
-from model.Model import MemoryInducedTransformer
+from model.Model import MemoryInducedTransformer, MambaInducedTransformer
 from utils.activation import SymSum
 from torch import nn
 import torch
@@ -112,8 +112,40 @@ def load_model_TCPFormer(args, device='cpu'):
                                graph_only=args.graph_only,
                                neighbour_num=args.neighbour_num,
                                n_frames=args.n_frames)
+    elif args.model_name == "MambaInducedTransformer":
+        model = MambaInducedTransformer(n_layers=args.n_layers,
+                               dim_in=args.dim_in,
+                               dim_feat=args.dim_feat,
+                               dim_rep=args.dim_rep,
+                               dim_out=args.dim_out,
+                               mlp_ratio=args.mlp_ratio,
+                               act_layer=act_mapper[args.act_layer],
+                               attn_drop=args.attn_drop,
+                               drop=args.drop,
+                               drop_path=args.drop_path,
+                               use_layer_scale=args.use_layer_scale,
+                               layer_scale_init_value=args.layer_scale_init_value,
+                               use_adaptive_fusion=args.use_adaptive_fusion,
+                               num_heads=args.num_heads,
+                               qkv_bias=args.qkv_bias,
+                               qkv_scale=args.qkv_scale,
+                               hierarchical=args.hierarchical,
+                               num_joints=args.num_joints,
+                               use_temporal_similarity=args.use_temporal_similarity,
+                               temporal_connection_len=args.temporal_connection_len,
+                               use_tcn=args.use_tcn,
+                               graph_only=args.graph_only,
+                               neighbour_num=args.neighbour_num,
+                               n_frames=args.n_frames,
+                               # Mamba特定参数
+                               mamba_d_state=getattr(args, 'mamba_d_state', 16),
+                               mamba_d_conv=getattr(args, 'mamba_d_conv', 4),
+                               mamba_expand=getattr(args, 'mamba_expand', 2),
+                               use_geometric_reorder=getattr(args, 'use_geometric_reorder', True),
+                               use_bidirectional=getattr(args, 'use_bidirectional', True),
+                               use_local_mamba=getattr(args, 'use_local_mamba', True))
     else:
-        raise Exception("Undefined model name")
+        raise Exception(f"Undefined model name: {args.model_name}")
 
     return model
 

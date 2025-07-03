@@ -5,10 +5,8 @@ Mamba-Enhanced TCPFormer训练脚本
 基于原始train.py修改，支持MambaInducedTransformer
 """
 
-import os
-import sys
 import argparse
-import time
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -18,15 +16,84 @@ import yaml
 from tqdm import tqdm
 import wandb
 
-# 添加项目路径
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# 导入损失函数
+from loss.pose3d import loss_mpjpe, n_mpjpe, loss_velocity, loss_limb_var, loss_limb_gt, loss_angle, \
+    loss_angle_velocity, miloss
+from loss.pose3d import jpe as calculate_jpe
+from loss.pose3d import p_mpjpe as calculate_p_mpjpe
+from loss.pose3d import mpjpe as calculate_mpjpe
+from loss.pose3d import acc_error as calculate_acc_err
 
-from common.opt import opts
-from common.utils import *
-from common.load_data_hm36 import Fusion
-from common.h36m_dataset import H36mDataset
+# 导入数据相关
+from data.const import H36M_JOINT_TO_LABEL, H36M_UPPER_BODY_JOINTS, H36M_LOWER_BODY_JOINTS, H36M_1_DF, H36M_2_DF, H36M_3_DF
+from data.reader.h36m import DataReaderH36M
+from data.reader.motion_dataset import MotionDataset3D
+
+# 导入工具函数
+from utils.data import flip_data, Augmenter2D
+from utils.tools import set_random_seed, get_config, print_args, create_directory_if_not_exists, count_param_numbers
+from utils.learning import AverageMeter, decay_lr_exponentially, load_model_TCPFormer
+from utils.wandb_utils import (
+    save_checkpoint,
+    save_checkpoint_to_wandb,
+    download_checkpoint_from_wandb,
+    init_wandb_for_resume,
+    init_wandb_for_new_run
+)
+
+# 导入模型
 from model.Model import MambaInducedTransformer
 
+
+def get_device():
+    """Get the best available device (XPU > CUDA > CPU)"""
+    print("[DEBUG] Checking available devices...")
+
+    # Check for Intel XPU
+    try:
+        import intel_extension_for_pytorch as ipex
+        print("[DEBUG] Intel Extension for PyTorch imported successfully")
+        if hasattr(torch, 'xpu'):
+            print("[DEBUG] torch.xpu is available")
+            if torch.xpu.is_available():
+                device_count = torch.xpu.device_count()
+                print(f"[DEBUG] XPU devices found: {device_count}")
+                return 'xpu'
+            else:
+                print("[DEBUG] torch.xpu.is_available() returned False")
+        else:
+            print("[DEBUG] torch.xpu is not available")
+    except ImportError as e:
+        print(f"[DEBUG] Intel Extension for PyTorch not available: {e}")
+
+    # Check for CUDA
+    if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+        print(f"[DEBUG] CUDA devices found: {device_count}")
+        return 'cuda'
+    else:
+        print("[DEBUG] CUDA not available")
+
+    print("[DEBUG] Falling back to CPU")
+    return 'cpu'
+
+def setup_device_parallel(model, device):
+    """Setup model for device and parallel processing if available"""
+    if device == 'xpu':
+        try:
+            import intel_extension_for_pytorch as ipex
+            if hasattr(torch, 'xpu') and torch.xpu.device_count() > 1:
+                model = torch.nn.DataParallel(model)
+        except ImportError:
+            pass
+    elif device == 'cuda' and torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+
+    return model
+
+# Only set CUDA_VISIBLE_DEVICES if CUDA is available
+if torch.cuda.is_available():
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 def parse_args():
     parser = argparse.ArgumentParser()
