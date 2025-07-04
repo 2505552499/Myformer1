@@ -53,3 +53,9 @@ lambda_mi: 0.001
 # Augmentation
 use_proj_as_2d: False
 flip: True
+
+# Checkpoint and logging
+checkpoint_dir: checkpoint/tcpformer_original/
+log_dir: logs/tcpformer_original/
+save_frequency: 10
+eval_frequency: 1

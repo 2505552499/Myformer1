@@ -434,7 +434,12 @@ class MemoryInducedTransformer(nn.Module):
                                     graph_only=graph_only,
                                     neighbour_num=neighbour_num,
                                     n_frames=n_frames,
-                                    type='temporal')
+                                    type='temporal',
+                                    # Mamba参数
+                                    use_mamba_enhanced=use_mamba_enhanced,
+                                    mamba_d_state=mamba_d_state,
+                                    mamba_d_conv=mamba_d_conv,
+                                    mamba_expand=mamba_expand)
         
 
         self.center_pose = nn.Parameter(torch.randn(int(n_frames/3),num_joints,dim_feat))

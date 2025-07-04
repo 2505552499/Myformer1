@@ -292,7 +292,16 @@ def evaluate(args, model, test_loader, datareader, device):
 
 def train(args, opts):
     print_args(args)
-    create_directory_if_not_exists(opts.new_checkpoint)
+
+    # 优先使用配置文件中的checkpoint_dir，如果没有则使用命令行参数
+    if hasattr(args, 'checkpoint_dir') and args.checkpoint_dir:
+        checkpoint_dir = args.checkpoint_dir
+        print(f"[INFO] Using checkpoint_dir from config: {checkpoint_dir}")
+    else:
+        checkpoint_dir = opts.new_checkpoint
+        print(f"[INFO] Using checkpoint_dir from command line: {checkpoint_dir}")
+
+    create_directory_if_not_exists(checkpoint_dir)
 
     train_dataset = MotionDataset3D(args, args.subset_list, 'train')
     test_dataset = MotionDataset3D(args, args.subset_list, 'test')
@@ -372,8 +381,8 @@ def train(args, opts):
             if opts.use_wandb:
                 init_wandb_for_new_run(wandb_id, wandb_name=opts.wandb_name, args=args)
 
-    checkpoint_path_latest = os.path.join(opts.new_checkpoint, 'latest_epoch.pth.tr')
-    checkpoint_path_best = os.path.join(opts.new_checkpoint, 'best_epoch.pth.tr')
+    checkpoint_path_latest = os.path.join(checkpoint_dir, 'latest_epoch.pth.tr')
+    checkpoint_path_best = os.path.join(checkpoint_dir, 'best_epoch.pth.tr')
 
     for epoch in range(epoch_start, args.epochs):
         if opts.eval_only:
