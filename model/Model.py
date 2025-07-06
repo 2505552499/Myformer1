@@ -511,6 +511,7 @@ class MambaInducedTransformer(MemoryInducedTransformer):
         }
 
         print(f"[INFO] MambaInducedTransformer initialized with config: {self.mamba_config}")
+        print("[INFO] Using PyTorch default initialization (kaiming_uniform for Linear layers)")
 
     def get_model_info(self):
         """获取模型信息"""
