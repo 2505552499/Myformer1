@@ -3,6 +3,7 @@ MambaEnhancedBlock - 替换DSTFormerBlock的Mamba增强版本
 """
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from timm.models.layers import DropPath
 from .mamba_core import BidirectionalMamba, LocalMamba, GeometricReorder
 from .mlp import MLP
@@ -24,14 +25,17 @@ class MambaEnhancedBlock(nn.Module):
                  # 保持与DSTFormerBlock兼容的参数
                  num_heads=8, qkv_bias=False, qk_scale=None, hierarchical=False,
                  use_temporal_similarity=True, temporal_connection_len=1, 
-                 use_tcn=False, graph_only=False, neighbour_num=4, attn_drop=0.):
+                 use_tcn=False, graph_only=False, neighbour_num=4, attn_drop=0.,
+                 # 显存优化参数
+                 use_checkpoint=False):
         super().__init__()
-        
+
         self.dim = dim
         self.n_frames = n_frames
         self.num_joints = num_joints
         self.use_adaptive_fusion = use_adaptive_fusion
         self.hierarchical = hierarchical
+        self.use_checkpoint = use_checkpoint  # 梯度检查点开关
         
         # 如果是hierarchical模式，调整维度
         if hierarchical:
@@ -116,16 +120,25 @@ class MambaEnhancedBlock(nn.Module):
         # 保存残差连接的输入
         residual = x
         
-        # 全局时空建模 (双向Mamba)
-        x_global = self.global_mamba(self.norm1(x))
-        
+        # 全局时空建模 (双向Mamba) - 可选梯度检查点
+        if self.use_checkpoint and self.training:
+            x_global = checkpoint(self.global_mamba, self.norm1(x))
+        else:
+            x_global = self.global_mamba(self.norm1(x))
+
         if self.debug_mode:
             print(f"Global Mamba output shape: {x_global.shape}")
-        
-        # 局部几何建模 (重排序 + 局部Mamba)
-        x_reordered = self.geometric_reorder(self.norm_local(x))
-        x_local = self.local_mamba(x_reordered)
-        x_local = self.geometric_reorder.restore(x_local)  # 恢复原始顺序
+
+        # 局部几何建模 (重排序 + 局部Mamba) - 可选梯度检查点
+        def local_mamba_fn(x_norm):
+            x_reordered = self.geometric_reorder(x_norm)
+            x_local = self.local_mamba(x_reordered)
+            return self.geometric_reorder.restore(x_local)
+
+        if self.use_checkpoint and self.training:
+            x_local = checkpoint(local_mamba_fn, self.norm_local(x))
+        else:
+            x_local = local_mamba_fn(self.norm_local(x))
         
         if self.debug_mode:
             print(f"Local Mamba output shape: {x_local.shape}")
