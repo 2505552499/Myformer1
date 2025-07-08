@@ -525,6 +525,35 @@ class MambaInducedTransformer(MemoryInducedTransformer):
         return info
 
 
+# 添加模型创建函数，支持不同的模型类型
+def create_model(model_name, **kwargs):
+    """
+    创建指定类型的模型
+
+    Args:
+        model_name: 模型名称 ('MemoryInducedTransformer', 'MambaInducedTransformer', 'CeATTEnhancedTCPFormer')
+        **kwargs: 模型参数
+
+    Returns:
+        model: 创建的模型实例
+    """
+    if model_name == 'MemoryInducedTransformer':
+        return MemoryInducedTransformer(**kwargs)
+    elif model_name == 'MambaInducedTransformer':
+        return MambaInducedTransformer(**kwargs)
+    elif model_name == 'CeATTEnhancedTCPFormer':
+        # 导入CeATT模型
+        try:
+            from model.CeATT_TCPFormer import CeATTEnhancedTCPFormer
+            return CeATTEnhancedTCPFormer(**kwargs)
+        except ImportError as e:
+            print(f"Failed to import CeATTEnhancedTCPFormer: {e}")
+            print("Falling back to MemoryInducedTransformer")
+            return MemoryInducedTransformer(**kwargs)
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
+
+
 def _test():
     torch.cuda.set_device(0)
     from torchprofile import profile_macs

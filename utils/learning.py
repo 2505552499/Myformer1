@@ -144,6 +144,72 @@ def load_model_TCPFormer(args, device='cpu'):
                                use_geometric_reorder=getattr(args, 'use_geometric_reorder', True),
                                use_bidirectional=getattr(args, 'use_bidirectional', True),
                                use_local_mamba=getattr(args, 'use_local_mamba', True))
+    elif args.model_name == "CeATTEnhancedTCPFormer":
+        # 导入CeATT模型
+        try:
+            from model.CeATT_TCPFormer import CeATTEnhancedTCPFormer
+
+            # 构建CeATT配置
+            ceatt_config = {
+                'temporal_sample_ratio': getattr(args, 'temporal_sample_ratio', 0.33),
+                'spatial_sample_ratio': getattr(args, 'spatial_sample_ratio', 0.5),
+                'temporal_window': getattr(args, 'temporal_window', 9),
+                'spatial_window': getattr(args, 'spatial_window', 4),
+                'replace_strategy': getattr(args, 'replace_strategy', 'progressive')
+            }
+
+            model = CeATTEnhancedTCPFormer(n_layers=args.n_layers,
+                                   dim_in=args.dim_in,
+                                   dim_feat=args.dim_feat,
+                                   dim_rep=args.dim_rep,
+                                   dim_out=args.dim_out,
+                                   mlp_ratio=args.mlp_ratio,
+                                   act_layer=act_mapper[args.act_layer],
+                                   attn_drop=args.attn_drop,
+                                   drop=args.drop,
+                                   drop_path=args.drop_path,
+                                   use_layer_scale=args.use_layer_scale,
+                                   layer_scale_init_value=args.layer_scale_init_value,
+                                   use_adaptive_fusion=args.use_adaptive_fusion,
+                                   num_heads=args.num_heads,
+                                   qkv_bias=args.qkv_bias,
+                                   qkv_scale=args.qkv_scale,
+                                   hierarchical=args.hierarchical,
+                                   num_joints=args.num_joints,
+                                   use_temporal_similarity=args.use_temporal_similarity,
+                                   temporal_connection_len=args.temporal_connection_len,
+                                   use_tcn=args.use_tcn,
+                                   graph_only=args.graph_only,
+                                   neighbour_num=args.neighbour_num,
+                                   n_frames=args.n_frames,
+                                   ceatt_config=ceatt_config)
+        except ImportError as e:
+            print(f"Failed to import CeATTEnhancedTCPFormer: {e}")
+            print("Falling back to MemoryInducedTransformer")
+            model = MemoryInducedTransformer(n_layers=args.n_layers,
+                                   dim_in=args.dim_in,
+                                   dim_feat=args.dim_feat,
+                                   dim_rep=args.dim_rep,
+                                   dim_out=args.dim_out,
+                                   mlp_ratio=args.mlp_ratio,
+                                   act_layer=act_mapper[args.act_layer],
+                                   attn_drop=args.attn_drop,
+                                   drop=args.drop,
+                                   drop_path=args.drop_path,
+                                   use_layer_scale=args.use_layer_scale,
+                                   layer_scale_init_value=args.layer_scale_init_value,
+                                   use_adaptive_fusion=args.use_adaptive_fusion,
+                                   num_heads=args.num_heads,
+                                   qkv_bias=args.qkv_bias,
+                                   qkv_scale=args.qkv_scale,
+                                   hierarchical=args.hierarchical,
+                                   num_joints=args.num_joints,
+                                   use_temporal_similarity=args.use_temporal_similarity,
+                                   temporal_connection_len=args.temporal_connection_len,
+                                   use_tcn=args.use_tcn,
+                                   graph_only=args.graph_only,
+                                   neighbour_num=args.neighbour_num,
+                                   n_frames=args.n_frames)
     else:
         raise Exception(f"Undefined model name: {args.model_name}")
 
